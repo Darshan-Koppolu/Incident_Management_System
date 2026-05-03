@@ -12,14 +12,14 @@ services:
       - "8000:8000"
 
   zookeeper:
-    image: bitnami/zookeeper:3.9
+    image: bitnami/zookeeper:3.8.4
     environment:
       ALLOW_ANONYMOUS_LOGIN: "yes"
-
+  
   kafka:
-    image: bitnami/kafka:3.6
+    image: bitnami/kafka:3.5.1
     environment:
       KAFKA_CFG_ZOOKEEPER_CONNECT: zookeeper:2181
       ALLOW_PLAINTEXT_LISTENER: "yes"
     ports:
-      - "9092:9092"    
+      - "9092:9092"   

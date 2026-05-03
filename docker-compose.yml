@@ -10,3 +10,16 @@ services:
     build: ./backend
     ports:
       - "8000:8000"
+
+  zookeeper:
+    image: bitnami/zookeeper
+    environment:
+      ALLOW_ANONYMOUS_LOGIN: "yes"
+
+  kafka:
+    image: bitnami/kafka
+    environment:
+      KAFKA_CFG_ZOOKEEPER_CONNECT: zookeeper:2181
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    ports:
+      - "9092:9092"    

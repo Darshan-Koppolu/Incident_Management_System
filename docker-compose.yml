@@ -31,3 +31,9 @@ services:
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@broker:9093
 
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+  worker:
+    build: ./backend
+    command: python worker.py
+    depends_on:
+      - broker

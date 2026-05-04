@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from kafka_producer import send_signal
 
 app = FastAPI()
 
@@ -26,9 +27,9 @@ def ingest_signal(signal: dict):
     if "message" not in signal:
         raise HTTPException(status_code=400, detail="message required")
 
-    print("Received signal:", signal)
+    send_signal(signal)
 
     return {
-        "status": "received",
+        "status": "sent to queue",
         "component": signal["component_id"]
     }

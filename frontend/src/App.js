@@ -1,19 +1,55 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 
 function App() {
+  const [incidents, setIncidents] = useState([]);
+
+  const fetchData = () => {
+    fetch("http://13.232.110.46:8000/api/incidents")
+      .then(res => res.json())
+      .then(data => setIncidents(data))
+      .catch(err => console.error("Error:", err));
+  };
 
   useEffect(() => {
-  fetch("/api/health")   // ✅ no IP needed
-    .then(res => res.json())
-    .then(data => console.log(data))
-    .catch(err => console.error(err));
-}, []);
+    fetchData();
+
+    // auto refresh every 5 sec
+    const interval = setInterval(fetchData, 5000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   return (
-    <div className="App">
-      <header className="App-header">
-        <h1>hi darshan</h1>
-      </header>
+    <div style={{ padding: "20px" }}>
+      <h1>🚨 Incident Dashboard</h1>
+
+      <table border="1" cellPadding="10">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Component</th>
+            <th>Message</th>
+            <th>Status</th>
+            <th>Time</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          {incidents.map(i => (
+            <tr key={i.id}>
+              <td>{i.id}</td>
+              <td>{i.component_id}</td>
+              <td>{i.message}</td>
+              <td style={{
+                color: i.status === "OPEN" ? "red" : "green"
+              }}>
+                {i.status}
+              </td>
+              <td>{i.created_at}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

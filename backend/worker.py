@@ -1,4 +1,5 @@
 from kafka import KafkaConsumer
+from db import get_connection
 import json
 import time
 import redis
@@ -7,6 +8,7 @@ import redis
 r = redis.Redis(host="redis", port=6379, decode_responses=True)
 
 consumer = None
+
 
 def get_consumer():
     global consumer
@@ -37,17 +39,28 @@ def process():
 
     print("Worker started listening...", flush=True)
 
+    # DB connection
+    conn = get_connection()
+    cursor = conn.cursor()
+    print("Connected to DB", flush=True)
+
     for message in c:
         data = message.value
         key = f"{data['component_id']}_{data['message']}"
 
-        # 🔥 CHECK REDIS
         if r.exists(key):
             print("Duplicate signal ignored:", data, flush=True)
         else:
-            # first time
             r.set(key, "active")
-            print("New incident created:", data, flush=True)
+
+            # Insert into DB
+            cursor.execute(
+                "INSERT INTO incidents (component_id, message, status) VALUES (%s, %s, %s)",
+                (data["component_id"], data["message"], "OPEN")
+            )
+            conn.commit()
+
+            print("New incident stored in DB:", data, flush=True)
 
 
 if __name__ == "__main__":

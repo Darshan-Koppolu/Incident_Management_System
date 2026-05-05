@@ -46,21 +46,53 @@ def process():
 
     for message in c:
         data = message.value
-        key = f"{data['component_id']}_{data['message']}"
 
-        if r.exists(key):
-            print("Duplicate signal ignored:", data, flush=True)
+        component = data.get("component_id")
+        msg = data.get("message")
+
+        # 🔥 IMPORTANT: only track DOWN state in Redis
+        key = f"{component}_down"
+
+        # =========================
+        # 🔴 DOWN EVENT
+        # =========================
+        if msg == "down":
+
+            if r.exists(key):
+                print("Duplicate DOWN ignored:", data, flush=True)
+
+            else:
+                r.set(key, "active")
+
+                cursor.execute(
+                    "INSERT INTO incidents (component_id, message, status) VALUES (%s, %s, %s)",
+                    (component, "down", "OPEN")
+                )
+                conn.commit()
+
+                print("Incident OPENED:", data, flush=True)
+
+        # =========================
+        # 🟢 UP EVENT
+        # =========================
+        elif msg == "up":
+
+            if r.exists(key):
+                r.delete(key)
+
+                cursor.execute(
+                    "UPDATE incidents SET status='RESOLVED' WHERE component_id=%s AND status='OPEN'",
+                    (component,)
+                )
+                conn.commit()
+
+                print("Incident RESOLVED:", data, flush=True)
+
+            else:
+                print("UP received but no active incident:", data, flush=True)
+
         else:
-            r.set(key, "active")
-
-            # Insert into DB
-            cursor.execute(
-                "INSERT INTO incidents (component_id, message, status) VALUES (%s, %s, %s)",
-                (data["component_id"], data["message"], "OPEN")
-            )
-            conn.commit()
-
-            print("New incident stored in DB:", data, flush=True)
+            print("Unknown message type:", data, flush=True)
 
 
 if __name__ == "__main__":

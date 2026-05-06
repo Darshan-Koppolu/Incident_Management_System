@@ -145,3 +145,33 @@ def update_status(incident_id: int, data: dict):
     conn.commit()
 
     return {"status": "updated"}
+
+
+@app.get("/api/incidents/{incident_id}/mttr")
+def get_mttr(incident_id: int):
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT start_time, end_time
+        FROM rca
+        WHERE incident_id = %s
+    """, (incident_id,))
+
+    row = cursor.fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="RCA not found")
+
+    start_time, end_time = row
+
+    if not start_time or not end_time:
+        raise HTTPException(status_code=400, detail="Invalid time data")
+
+    mttr = end_time - start_time
+
+    return {
+        "incident_id": incident_id,
+        "mttr": str(mttr)
+    }

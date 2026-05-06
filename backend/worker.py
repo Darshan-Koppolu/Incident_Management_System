@@ -101,13 +101,13 @@ def process():
                 conn.commit()
 
                 print("Incident RESOLVED:", data, flush=True)
-
-            else:
-                print("UP received but no active incident:", data, flush=True)
                 send_email(
                     "✅ Incident RESOLVED",
                     f"{component} is UP"
                 )
+
+            else:
+                print("UP received but no active incident:", data, flush=True)
 
 
         # =========================

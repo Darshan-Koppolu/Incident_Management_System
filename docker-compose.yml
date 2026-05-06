@@ -4,13 +4,22 @@ services:
   frontend:
     build: ./frontend
     ports:
-      - "80:80"  
+      - "80:80"
+    depends_on:
+      - backend
 
   backend:
     build: ./backend
+    restart: always
     ports:
       - "8000:8000"
+    depends_on:
+      - db
+      - broker
+      - redis
+      - mongodb
 
+  # 🔥 Kafka (KRaft mode - no zookeeper needed)
   broker:
     image: apache/kafka:latest
     ports:
@@ -20,29 +29,33 @@ services:
       KAFKA_PROCESS_ROLES: broker,controller
 
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
-
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker:9092
 
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
-
-    # ✅ FIX
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@broker:9093
 
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
 
+  # 🔥 Worker (Kafka consumer)
   worker:
     build: ./backend
     command: python worker.py
     depends_on:
       - broker
- 
+      - db
+      - redis
+      - mongodb
+
+  # 🔥 Redis (cache / dedup)
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data
 
+  # 🔥 PostgreSQL (main DB)
   db:
     image: postgres:15
     environment:
@@ -52,8 +65,18 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data  
+      - postgres_data:/var/lib/postgresql/data
 
+  # 🔥 MongoDB (raw signals / data lake)
+  mongodb:
+    image: mongo:6
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
 
+# 🔥 Volumes (VERY IMPORTANT)
 volumes:
-  postgres_data:      
+  postgres_data:
+  mongo_data:
+  redis_data:

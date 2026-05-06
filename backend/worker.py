@@ -1,5 +1,6 @@
 from kafka import KafkaConsumer
 from db import get_connection
+from mongo import signals_collection
 import json
 import time
 import redis
@@ -50,7 +51,14 @@ def process():
         component = data.get("component_id")
         msg = data.get("message")
 
-        # 🔥 IMPORTANT: only track DOWN state in Redis
+        # 🟢 STEP 1: Store EVERY signal in MongoDB (Data Lake)
+        signals_collection.insert_one({
+            "component_id": component,
+            "message": msg,
+            "timestamp": time.time()
+        })
+
+        # 🔥 Redis key (only track DOWN state)
         key = f"{component}_down"
 
         # =========================
@@ -91,6 +99,9 @@ def process():
             else:
                 print("UP received but no active incident:", data, flush=True)
 
+        # =========================
+        # ❓ UNKNOWN EVENT
+        # =========================
         else:
             print("Unknown message type:", data, flush=True)
 

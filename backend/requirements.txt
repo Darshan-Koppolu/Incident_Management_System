@@ -3,3 +3,4 @@ uvicorn
 kafka-python
 redis
 psycopg2-binary
+pymongo

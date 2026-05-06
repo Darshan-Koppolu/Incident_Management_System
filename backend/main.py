@@ -2,20 +2,38 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from kafka_producer import send_signal
 from db import get_connection
+from email_service import send_email
+import time
+import redis
 
 app = FastAPI()
 
-# ✅ CORS (frontend connect avvadaniki)
+r = redis.Redis(host="redis", port=6379, decode_responses=True)
+
+# =========================
+# Rate Limiter
+# =========================
+def rate_limit():
+    key = f"rate:{int(time.time())}"
+    count = r.incr(key)
+    r.expire(key, 1)
+
+    return count <= 100
+
+
+# =========================
+# CORS
+# =========================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # dev lo ok
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # =========================
-# Health Check
+# Health
 # =========================
 @app.get("/api/health")
 def health():
@@ -23,10 +41,13 @@ def health():
 
 
 # =========================
-# POST Signal → Kafka
+# Signal API
 # =========================
 @app.post("/api/signal")
 def ingest_signal(signal: dict):
+
+    if not rate_limit():
+        raise HTTPException(status_code=429, detail="Too many requests")
 
     if "component_id" not in signal:
         raise HTTPException(status_code=400, detail="component_id required")
@@ -34,20 +55,16 @@ def ingest_signal(signal: dict):
     if "message" not in signal:
         raise HTTPException(status_code=400, detail="message required")
 
-    # Optional validation (recommended)
     if signal["message"] not in ["down", "up"]:
-        raise HTTPException(status_code=400, detail="Invalid message (use 'down' or 'up')")
+        raise HTTPException(status_code=400, detail="Invalid message")
 
     send_signal(signal)
 
-    return {
-        "status": "sent to queue",
-        "component": signal["component_id"]
-    }
+    return {"status": "sent to queue", "component": signal["component_id"]}
 
 
 # =========================
-# GET Incidents → DB
+# Get Incidents
 # =========================
 @app.get("/api/incidents")
 def get_incidents():
@@ -62,91 +79,84 @@ def get_incidents():
 
     rows = cursor.fetchall()
 
-    incidents = []
-    for row in rows:
-        incidents.append({
-            "id": row[0],
-            "component_id": row[1],
-            "message": row[2],
-            "status": row[3],
-            "created_at": str(row[4])
-        })
-
-    return incidents
-
+    return [
+        {
+            "id": r[0],
+            "component_id": r[1],
+            "message": r[2],
+            "status": r[3],
+            "created_at": str(r[4])
+        }
+        for r in rows
+    ]
 
 
+# =========================
+# RCA
+# =========================
 @app.post("/api/incidents/{incident_id}/rca")
 def add_rca(incident_id: int, data: dict):
-
-    required_fields = ["root_cause", "fix", "prevention", "start_time", "end_time"]
-
-    for field in required_fields:
-        if field not in data:
-            raise HTTPException(status_code=400, detail=f"{field} required")
 
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute(
-        """
+    cursor.execute("""
         INSERT INTO rca (incident_id, root_cause, fix, prevention, start_time, end_time)
         VALUES (%s, %s, %s, %s, %s, %s)
-        """,
-        (
-            incident_id,
-            data["root_cause"],
-            data["fix"],
-            data["prevention"],
-            data["start_time"],
-            data["end_time"]
-        )
-    )
+    """, (
+        incident_id,
+        data["root_cause"],
+        data["fix"],
+        data["prevention"],
+        data["start_time"],
+        data["end_time"]
+    ))
 
     conn.commit()
 
     return {"status": "RCA added"}
 
 
+# =========================
+# UPDATE STATUS (CRITICAL)
+# =========================
 @app.put("/api/incidents/{incident_id}/status")
 def update_status(incident_id: int, data: dict):
-
-    if "status" not in data:
-        raise HTTPException(status_code=400, detail="status required")
-
-    new_status = data["status"]
 
     conn = get_connection()
     cursor = conn.cursor()
 
-    # 🔥 RULE: Cannot CLOSE without RCA
-    if new_status == "CLOSED":
-        cursor.execute(
-            "SELECT * FROM rca WHERE incident_id=%s",
-            (incident_id,)
-        )
-        rca = cursor.fetchone()
+    new_status = data["status"]
 
-        if not rca:
+    # ❌ Cannot CLOSE without RCA
+    if new_status == "CLOSED":
+        cursor.execute("SELECT * FROM rca WHERE incident_id=%s", (incident_id,))
+        if not cursor.fetchone():
             raise HTTPException(
                 status_code=400,
-                detail="Cannot CLOSE incident without RCA"
+                detail="Cannot CLOSE without RCA"
             )
 
     cursor.execute(
-        """
-        UPDATE incidents
-        SET status=%s, updated_at=NOW()
-        WHERE id=%s
-        """,
+        "UPDATE incidents SET status=%s WHERE id=%s",
         (new_status, incident_id)
     )
 
     conn.commit()
 
+    # 🔥 EMAIL ON CLOSE
+    if new_status == "CLOSED":
+        send_email(
+            "📌 Incident CLOSED",
+            f"Incident {incident_id} has been CLOSED after RCA"
+        )
+
     return {"status": "updated"}
 
 
+# =========================
+# MTTR
+# =========================
 @app.get("/api/incidents/{incident_id}/mttr")
 def get_mttr(incident_id: int):
 
@@ -155,8 +165,7 @@ def get_mttr(incident_id: int):
 
     cursor.execute("""
         SELECT start_time, end_time
-        FROM rca
-        WHERE incident_id = %s
+        FROM rca WHERE incident_id=%s
     """, (incident_id,))
 
     row = cursor.fetchone()
@@ -164,14 +173,6 @@ def get_mttr(incident_id: int):
     if not row:
         raise HTTPException(status_code=404, detail="RCA not found")
 
-    start_time, end_time = row
+    mttr = row[1] - row[0]
 
-    if not start_time or not end_time:
-        raise HTTPException(status_code=400, detail="Invalid time data")
-
-    mttr = end_time - start_time
-
-    return {
-        "incident_id": incident_id,
-        "mttr": str(mttr)
-    }
+    return {"incident_id": incident_id, "mttr": str(mttr)}

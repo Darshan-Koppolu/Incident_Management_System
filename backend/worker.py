@@ -1,6 +1,7 @@
 from kafka import KafkaConsumer
 from db import get_connection
 from mongo import signals_collection
+from email_service import send_email
 import json
 import time
 import redis
@@ -79,6 +80,11 @@ def process():
                 conn.commit()
 
                 print("Incident OPENED:", data, flush=True)
+                send_email(
+                    "🚨 Incident OPEN",
+                    f"{component} is DOWN"
+                )
+
 
         # =========================
         # 🟢 UP EVENT
@@ -98,6 +104,11 @@ def process():
 
             else:
                 print("UP received but no active incident:", data, flush=True)
+                send_email(
+                    "✅ Incident RESOLVED",
+                    f"{component} is UP"
+                )
+
 
         # =========================
         # ❓ UNKNOWN EVENT
